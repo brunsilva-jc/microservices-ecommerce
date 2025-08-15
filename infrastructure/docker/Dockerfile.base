@@ -1,0 +1,33 @@
+# Base Dockerfile for all Node.js services
+FROM node:20-alpine AS base
+
+# Install dumb-init for proper signal handling
+RUN apk add --no-cache dumb-init
+
+# Create app directory
+WORKDIR /app
+
+# Development stage
+FROM base AS development
+ENV NODE_ENV=development
+COPY package*.json ./
+RUN npm ci
+COPY . .
+CMD ["dumb-init", "npm", "run", "dev"]
+
+# Builder stage
+FROM base AS builder
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Production stage
+FROM base AS production
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --only=production
+COPY --from=builder /app/dist ./dist
+USER node
+EXPOSE 3000
+CMD ["dumb-init", "node", "dist/index.js"]

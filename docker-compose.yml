@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: ecommerce-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin123
+      MONGO_INITDB_DATABASE: ecommerce
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./infrastructure/docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - ecommerce-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: ecommerce-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - ecommerce-network
+
+  auth-service:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+      target: development
+    container_name: ecommerce-auth
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      MONGODB_URI: mongodb://admin:admin123@mongodb:27017/ecommerce-auth?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-key-change-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-key}
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./services/auth:/app
+      - /app/node_modules
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - ecommerce-network
+    command: npm run dev
+
+  # product-service:
+  #   build:
+  #     context: ./services/product
+  #     dockerfile: Dockerfile
+  #   container_name: ecommerce-product
+  #   restart: unless-stopped
+  #   environment:
+  #     NODE_ENV: development
+  #     PORT: 3002
+  #     MONGODB_URI: mongodb://admin:admin123@mongodb:27017/ecommerce-product?authSource=admin
+  #     REDIS_URL: redis://redis:6379
+  #   ports:
+  #     - "3002:3002"
+  #   volumes:
+  #     - ./services/product:/app
+  #     - /app/node_modules
+  #   depends_on:
+  #     - mongodb
+  #     - redis
+  #   networks:
+  #     - ecommerce-network
+  #   command: npm run dev
+
+  # gateway:
+  #   build:
+  #     context: ./services/gateway
+  #     dockerfile: Dockerfile
+  #   container_name: ecommerce-gateway
+  #   restart: unless-stopped
+  #   environment:
+  #     NODE_ENV: development
+  #     PORT: 3000
+  #     AUTH_SERVICE_URL: http://auth-service:3001
+  #     PRODUCT_SERVICE_URL: http://product-service:3002
+  #     ORDER_SERVICE_URL: http://order-service:3003
+  #     CART_SERVICE_URL: http://cart-service:3004
+  #     REDIS_URL: redis://redis:6379
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - ./services/gateway:/app
+  #     - /app/node_modules
+  #   depends_on:
+  #     - auth-service
+  #     - product-service
+  #   networks:
+  #     - ecommerce-network
+  #   command: npm run dev
+
+volumes:
+  mongodb_data:
+  redis_data:
+
+networks:
+  ecommerce-network:
+    driver: bridge
