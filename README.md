@@ -34,7 +34,7 @@ This platform follows a microservices architecture pattern with the following se
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/ecommerce-platform.git
+git clone https://github.com/brunsilva-jc/ecommerce-platform.git
 cd ecommerce-platform
 ```
 
@@ -185,7 +185,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 👥 Authors
 
-- Bruno - Initial work
+- Bruno Silva
 
 ## 🙏 Acknowledgments
 
