@@ -1,6 +1,7 @@
 import { Context } from 'koa';
 import { User } from '../models/user.model';
 import { JWTService } from '../services/jwt.service';
+import { emailService } from '../services/email.service';
 import { AppError } from '../middleware/error.middleware';
 import { Logger } from '../utils/logger';
 
@@ -33,7 +34,8 @@ export class AuthController {
     // Generate tokens
     const tokens = await JWTService.generateTokenPair(user);
 
-    // TODO: Send verification email
+    // Send verification email
+    await emailService.sendVerificationEmail(user.email, user.emailVerificationToken!);
 
     log.info(`New user registered: ${user.email}`);
 
@@ -163,7 +165,8 @@ export class AuthController {
     const resetToken = user.generatePasswordResetToken();
     await user.save();
 
-    // TODO: Send password reset email
+    // Send password reset email
+    await emailService.sendPasswordResetEmail(user.email, resetToken);
 
     log.info(`Password reset requested for: ${user.email}`);
 
@@ -239,6 +242,9 @@ export class AuthController {
     user.isEmailVerified = true;
     user.emailVerificationToken = undefined;
     await user.save();
+
+    // Send welcome email
+    await emailService.sendWelcomeEmail(user.email, user.firstName);
 
     log.info(`Email verified for: ${user.email}`);
 

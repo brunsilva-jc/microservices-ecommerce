@@ -4,19 +4,27 @@ import bodyParser from 'koa-bodyparser';
 import { router } from '../src/routes';
 import { errorMiddleware } from '../src/middleware/error.middleware';
 import { User } from '../src/models/user.model';
+import { JWTService } from '../src/services/jwt.service';
+import { getRedisClient } from '../src/database/redis';
 
 describe('Auth Controller', () => {
   let app: Koa;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     app = new Koa();
     app.use(errorMiddleware);
     app.use(bodyParser());
     app.use(router.routes());
     app.use(router.allowedMethods());
+    
+    // Clear database before each test
+    await User.deleteMany({});
+    // Clear Redis
+    const redis = getRedisClient();
+    await redis.flushall();
   });
 
-  describe('POST /api/v1/auth/register', () => {
+  describe('POST /auth/register', () => {
     it('should register a new user', async () => {
       const userData = {
         email: 'test@example.com',
@@ -26,7 +34,7 @@ describe('Auth Controller', () => {
       };
 
       const response = await request(app.callback())
-        .post('/api/v1/auth/register')
+        .post('/auth/register')
         .send(userData)
         .expect(201);
 
@@ -52,7 +60,7 @@ describe('Auth Controller', () => {
 
       // Try to create another user with same email
       const response = await request(app.callback())
-        .post('/api/v1/auth/register')
+        .post('/auth/register')
         .send(userData)
         .expect(400);
 
@@ -67,7 +75,7 @@ describe('Auth Controller', () => {
       };
 
       const response = await request(app.callback())
-        .post('/api/v1/auth/register')
+        .post('/auth/register')
         .send(invalidData)
         .expect(400);
 
@@ -75,7 +83,7 @@ describe('Auth Controller', () => {
     });
   });
 
-  describe('POST /api/v1/auth/login', () => {
+  describe('POST /auth/login', () => {
     it('should login with valid credentials', async () => {
       const userData = {
         email: 'test@example.com',
@@ -89,7 +97,7 @@ describe('Auth Controller', () => {
       await user.save();
 
       const response = await request(app.callback())
-        .post('/api/v1/auth/login')
+        .post('/auth/login')
         .send({
           email: userData.email,
           password: userData.password,
@@ -103,7 +111,7 @@ describe('Auth Controller', () => {
 
     it('should not login with invalid credentials', async () => {
       const response = await request(app.callback())
-        .post('/api/v1/auth/login')
+        .post('/auth/login')
         .send({
           email: 'nonexistent@example.com',
           password: 'wrongpassword',
@@ -128,7 +136,7 @@ describe('Auth Controller', () => {
       await user.save();
 
       const response = await request(app.callback())
-        .post('/api/v1/auth/login')
+        .post('/auth/login')
         .send({
           email: userData.email,
           password: userData.password,
@@ -137,6 +145,155 @@ describe('Auth Controller', () => {
 
       expect(response.body.success).toBe(false);
       expect(response.body.error.code).toBe('ACCOUNT_DEACTIVATED');
+    });
+  });
+
+  describe('POST /auth/refresh', () => {
+    it('should refresh tokens with valid refresh token', async () => {
+      const user = new User({
+        email: 'test@example.com',
+        password: 'password123',
+        firstName: 'John',
+        lastName: 'Doe',
+      });
+      await user.save();
+
+      const tokens = await JWTService.generateTokenPair(user);
+
+      const response = await request(app.callback())
+        .post('/auth/refresh')
+        .send({ refreshToken: tokens.refreshToken })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.tokens).toHaveProperty('accessToken');
+      expect(response.body.data.tokens).toHaveProperty('refreshToken');
+    });
+
+    it('should not refresh with invalid token', async () => {
+      const response = await request(app.callback())
+        .post('/auth/refresh')
+        .send({ refreshToken: 'invalid-token' })
+        .expect(401);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.error.code).toBe('INVALID_REFRESH_TOKEN');
+    });
+  });
+
+  describe('POST /auth/logout', () => {
+    it('should logout successfully', async () => {
+      const user = new User({
+        email: 'test@example.com',
+        password: 'password123',
+        firstName: 'John',
+        lastName: 'Doe',
+      });
+      await user.save();
+
+      const tokens = await JWTService.generateTokenPair(user);
+
+      const response = await request(app.callback())
+        .post('/auth/logout')
+        .set('Authorization', `Bearer ${tokens.accessToken}`)
+        .send({ refreshToken: tokens.refreshToken })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+    });
+
+    it('should require authentication', async () => {
+      await request(app.callback())
+        .post('/auth/logout')
+        .expect(401);
+    });
+  });
+
+  describe('POST /auth/forgot-password', () => {
+    it('should send reset email for existing user', async () => {
+      const user = new User({
+        email: 'test@example.com',
+        password: 'password123',
+        firstName: 'John',
+        lastName: 'Doe',
+      });
+      await user.save();
+
+      const response = await request(app.callback())
+        .post('/auth/forgot-password')
+        .send({ email: 'test@example.com' })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+    });
+  });
+
+  describe('POST /auth/reset-password', () => {
+    it('should reset password with valid token', async () => {
+      const user = new User({
+        email: 'test@example.com',
+        password: 'oldpassword123',
+        firstName: 'John',
+        lastName: 'Doe',
+      });
+      const resetToken = user.generatePasswordResetToken();
+      await user.save();
+
+      const response = await request(app.callback())
+        .post('/auth/reset-password')
+        .send({
+          token: resetToken,
+          password: 'newpassword123',
+        })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+    });
+  });
+
+  describe('GET /auth/verify-email/:token', () => {
+    it('should verify email with valid token', async () => {
+      const verificationToken = 'verify-token-123';
+      const user = new User({
+        email: 'test@example.com',
+        password: 'password123',
+        firstName: 'John',
+        lastName: 'Doe',
+        emailVerificationToken: verificationToken,
+        isEmailVerified: false,
+      });
+      await user.save();
+
+      const response = await request(app.callback())
+        .get(`/auth/verify-email/${verificationToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+    });
+  });
+
+  describe('POST /auth/change-password', () => {
+    it('should change password when authenticated', async () => {
+      const user = new User({
+        email: 'test@example.com',
+        password: 'oldpassword123',
+        firstName: 'John',
+        lastName: 'Doe',
+      });
+      await user.save();
+
+      const tokens = await JWTService.generateTokenPair(user);
+
+      const response = await request(app.callback())
+        .post('/auth/change-password')
+        .set('Authorization', `Bearer ${tokens.accessToken}`)
+        .send({
+          currentPassword: 'oldpassword123',
+          newPassword: 'newpassword123',
+        })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
     });
   });
 });

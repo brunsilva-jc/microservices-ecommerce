@@ -53,4 +53,6 @@ export const config = {
       },
     },
   },
+  
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:4200',
 };
